@@ -45,7 +45,8 @@ async def download_fingerprint(session, url):
         with Image.open(io.BytesIO(raw)) as image:
             image.verify()
         with Image.open(io.BytesIO(raw)) as image:
-            return encode_fingerprint(fingerprint_image(image))
+            hashes = await asyncio.to_thread(fingerprint_image, image.copy())
+            return encode_fingerprint(hashes)
     except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
         return None
 
