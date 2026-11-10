@@ -23,7 +23,7 @@ def init_db():
         """)
         columns = {r["name"] for r in db.execute("PRAGMA table_info(pokemon_images)")}
         if "updated_at" not in columns:
-            db.execute("ALTER TABLE pokemon_images ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+            db.execute("ALTER TABLE pokemon_images ADD COLUMN updated_at TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS idx_pokemon_hash ON pokemon_images(image_hash)")
         db.execute("""
             CREATE TABLE IF NOT EXISTS feedback (
