@@ -1,5 +1,5 @@
-discord.py[voice]>=2.4,<3
-aiohttp>=3.9,<4
-Pillow>=10,<12
+discord.py[voice]>=2.5,<3
+aiohttp>=3.10,<4
+Pillow>=10,<13
 ImageHash>=4.3,<5
 python-dotenv>=1.0,<2
