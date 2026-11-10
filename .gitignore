@@ -1,0 +1,21 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Local runtime data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
