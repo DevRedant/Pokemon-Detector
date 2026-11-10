@@ -54,12 +54,18 @@ async def background_dataset_sync():
     if image_count() > 0:
         log.info("Dataset cache contains %d images.", image_count())
         return
-    try:
-        log.info("Starting initial PokeAPI dataset download.")
-        count = await sync_dataset()
-        log.info("Initial dataset sync saved %d images.", count)
-    except Exception:
-        log.exception("Initial dataset sync failed; use %sdataset sync to retry.", config.PREFIX)
+    if dataset_lock.locked():
+        log.info("A dataset sync is already running; skipping automatic sync.")
+        return
+    async with dataset_lock:
+        if image_count() > 0:
+            return
+        try:
+            log.info("Starting initial PokeAPI dataset download.")
+            count = await sync_dataset()
+            log.info("Initial dataset sync saved %d images.", count)
+        except Exception:
+            log.exception("Initial dataset sync failed; use %sdataset sync to retry.", config.PREFIX)
 
 async def process_images(message):
     try:
