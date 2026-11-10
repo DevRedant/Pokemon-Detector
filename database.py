@@ -13,15 +13,24 @@ def init_db():
         db.execute("""
             CREATE TABLE IF NOT EXISTS pokemon_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pokemon_name TEXT NOT NULL,
+                pokemon_name TEXT,
                 image_url TEXT NOT NULL UNIQUE,
                 image_hash TEXT NOT NULL,
                 variant TEXT NOT NULL DEFAULT 'normal',
                 source TEXT NOT NULL DEFAULT 'PokeAPI',
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migrate older database layouts without discarding cached images.
         columns = {r["name"] for r in db.execute("PRAGMA table_info(pokemon_images)")}
+        if "pokemon_name" not in columns:
+            db.execute("ALTER TABLE pokemon_images ADD COLUMN pokemon_name TEXT")
+            if "name" in columns:
+                db.execute("UPDATE pokemon_images SET pokemon_name=name WHERE pokemon_name IS NULL")
+        if "variant" not in columns:
+            db.execute("ALTER TABLE pokemon_images ADD COLUMN variant TEXT NOT NULL DEFAULT 'normal'")
+        if "source" not in columns:
+            db.execute("ALTER TABLE pokemon_images ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'")
         if "updated_at" not in columns:
             db.execute("ALTER TABLE pokemon_images ADD COLUMN updated_at TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS idx_pokemon_hash ON pokemon_images(image_hash)")
@@ -55,7 +64,7 @@ def save_image(name, url, image_hash, variant="normal", source="PokeAPI"):
 
 def get_all_hashes():
     with connect() as db:
-        return db.execute("SELECT pokemon_name,image_hash,variant FROM pokemon_images").fetchall()
+        return db.execute("SELECT pokemon_name,image_hash,variant FROM pokemon_images WHERE pokemon_name IS NOT NULL").fetchall()
 
 def image_count():
     with connect() as db:
