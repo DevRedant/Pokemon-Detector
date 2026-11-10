@@ -1,3 +1,4 @@
+import asyncio
 import io
 import ipaddress
 from urllib.parse import urlparse
@@ -83,7 +84,7 @@ async def read_image_url(url, session):
         with Image.open(io.BytesIO(raw)) as image:
             image.verify()
         with Image.open(io.BytesIO(raw)) as image:
-            return fingerprint_image(image)
+            return await asyncio.to_thread(fingerprint_image, image.copy())
     except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
         return None
 
