@@ -2,12 +2,14 @@ import sqlite3
 from config import DATABASE
 
 def connect():
-    db = sqlite3.connect(DATABASE)
+    db = sqlite3.connect(DATABASE, timeout=30)
     db.row_factory = sqlite3.Row
+    db.execute("PRAGMA busy_timeout=30000")
     return db
 
 def init_db():
     with connect() as db:
+        db.execute("PRAGMA journal_mode=WAL")
         db.execute("""
             CREATE TABLE IF NOT EXISTS pokemon_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,9 +17,13 @@ def init_db():
                 image_url TEXT NOT NULL UNIQUE,
                 image_hash TEXT NOT NULL,
                 variant TEXT NOT NULL DEFAULT 'normal',
-                source TEXT NOT NULL DEFAULT 'PokeAPI'
+                source TEXT NOT NULL DEFAULT 'PokeAPI',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        columns = {r["name"] for r in db.execute("PRAGMA table_info(pokemon_images)")}
+        if "updated_at" not in columns:
+            db.execute("ALTER TABLE pokemon_images ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
         db.execute("CREATE INDEX IF NOT EXISTS idx_pokemon_hash ON pokemon_images(image_hash)")
         db.execute("""
             CREATE TABLE IF NOT EXISTS feedback (
@@ -42,7 +48,9 @@ def save_image(name, url, image_hash, variant="normal", source="PokeAPI"):
             ON CONFLICT(image_url) DO UPDATE SET
               pokemon_name=excluded.pokemon_name,
               image_hash=excluded.image_hash,
-              variant=excluded.variant
+              variant=excluded.variant,
+              source=excluded.source,
+              updated_at=CURRENT_TIMESTAMP
         """, (name, url, image_hash, variant, source))
 
 def get_all_hashes():
