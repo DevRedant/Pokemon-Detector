@@ -1,45 +1,92 @@
 import io
+import ipaddress
+from urllib.parse import urlparse
+
 import aiohttp
 from PIL import Image, UnidentifiedImageError
 import imagehash
-from config import MATCH_THRESHOLD, MAX_IMAGE_SIZE
+
+from config import MATCH_THRESHOLD, MATCH_MIN_MARGIN, MAX_IMAGE_SIZE
 from database import get_all_hashes
 
-async def read_image_url(url, session):
+def _safe_image_url(url):
     try:
-        async with session.get(url, allow_redirects=True) as response:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            return False
+        host = parsed.hostname.lower()
+        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+            return False
+        try:
+            if ipaddress.ip_address(host).is_private or ipaddress.ip_address(host).is_loopback:
+                return False
+        except ValueError:
+            pass
+        return True
+    except (TypeError, ValueError):
+        return False
+
+def fingerprint_image(image):
+    image = image.convert("RGB")
+    image.thumbnail((512, 512))
+    return (imagehash.phash(image), imagehash.dhash(image), imagehash.whash(image))
+
+def encode_fingerprint(hashes):
+    return "v2|" + "|".join(str(item) for item in hashes)
+
+def _distance(query, stored):
+    try:
+        if stored.startswith("v2|"):
+            parts = stored.split("|")
+            if len(parts) != 4:
+                return None
+            refs = [imagehash.hex_to_hash(x) for x in parts[1:]]
+            return (2 * (query[0] - refs[0]) + (query[1] - refs[1]) + (query[2] - refs[2])) / 4
+        # Backward compatibility with older pHash-only database entries.
+        return float(query[0] - imagehash.hex_to_hash(stored))
+    except (ValueError, TypeError):
+        return None
+
+def best_match(query_hashes):
+    if query_hashes is None:
+        return None
+    ranked = []
+    for row in get_all_hashes():
+        distance = _distance(query_hashes, row["image_hash"])
+        if distance is not None:
+            ranked.append((distance, row["pokemon_name"], row["variant"]))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: item[0])
+    best = ranked[0]
+    # Ambiguity is measured against a different Pokémon label, not another sprite of the same one.
+    second = next((item for item in ranked[1:] if item[1].casefold() != best[1].casefold()), None)
+    if best[0] > MATCH_THRESHOLD:
+        return None
+    if second and (second[0] - best[0]) < MATCH_MIN_MARGIN:
+        return None
+    return best[1], best[2], round(best[0], 1)
+
+async def read_image_url(url, session):
+    if not _safe_image_url(url):
+        return None
+    try:
+        async with session.get(url, allow_redirects=False) as response:
             if response.status != 200:
                 return None
             content_type = response.headers.get("Content-Type", "").lower()
-            if content_type and not content_type.startswith("image/"):
+            if not content_type.startswith("image/"):
                 return None
             raw = await response.content.read(MAX_IMAGE_SIZE + 1)
             if len(raw) > MAX_IMAGE_SIZE:
                 return None
         with Image.open(io.BytesIO(raw)) as image:
-            image = image.convert("RGB")
-            image.thumbnail((512, 512))
-            return imagehash.phash(image)
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            return fingerprint_image(image)
     except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
         return None
 
-def best_match(query_hash):
-    if query_hash is None:
-        return None
-    best = None
-    best_distance = 65
-    for row in get_all_hashes():
-        try:
-            distance = query_hash - imagehash.hex_to_hash(row["image_hash"])
-        except (ValueError, TypeError):
-            continue
-        if distance < best_distance:
-            best_distance = distance
-            best = (row["pokemon_name"], row["variant"], distance)
-    if best and best_distance <= MATCH_THRESHOLD:
-        return best
-    return None
-
 async def detect_url(url, session):
-    fingerprint = await read_image_url(url, session)
-    return best_match(fingerprint)
+    hashes = await read_image_url(url, session)
+    return best_match(hashes)
