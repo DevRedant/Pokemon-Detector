@@ -1,0 +1,49 @@
+name: Python checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Compile Python files
+        run: python -m compileall -q .
+      - name: Smoke test imports and SQLite
+        env:
+          DISCORD_TOKEN: ci-placeholder-token
+          OWNER_ID: "123456789012345678"
+          DATABASE: /tmp/pokemon-detector-ci/pokemon.db
+        run: |
+          python - <<'PY'
+          import asyncio
+          import bot
+          from database import init_db, image_count, save_image
+          from detector import fingerprint_image, encode_fingerprint, best_match
+          from PIL import Image
+
+          init_db()
+          image = Image.new("RGB", (64, 64), (120, 40, 200))
+          hashes = fingerprint_image(image)
+          stored = encode_fingerprint(hashes)
+          save_image("CI Testmon", "https://example.com/ci-test.png", stored)
+          assert image_count() == 1
+          match = best_match(hashes)
+          assert match and match[0] == "CI Testmon"
+          print("Import, SQLite, fingerprint and matching smoke tests passed.")
+          PY
