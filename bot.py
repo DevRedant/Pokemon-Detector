@@ -96,8 +96,8 @@ async def process_images(message):
                         reference=message, mention_author=False,
                         allowed_mentions=discord.AllowedMentions.none()
                     )
-                    log.info("Detected %s (variant=%s, distance=%s) in message %s",
-                             name, variant, distance, message.id)
+                    log.info("Detected %s (variant=%s, method=%s, score=%s) in message %s",
+                             name, variant, method, score, message.id)
                     return
                 log.info("No Pokémon match for image in message %s", message.id)
     except (discord.HTTPException, aiohttp.ClientError):
