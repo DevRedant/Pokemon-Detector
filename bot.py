@@ -1,5 +1,10 @@
 import asyncio
+import io
 import logging
+import re
+from pathlib import Path
+
+from PIL import Image, UnidentifiedImageError
 
 import aiohttp
 import discord
@@ -82,11 +87,12 @@ async def process_images(message):
                 log.info("Downloading image for message %s: %s", message.id, url)
                 result = await detect_url(url, http_session)
                 if result:
-                    name, variant, distance = result
+                    name, variant, score, method = result
                     mark_detected(message.id, name)
                     shiny = " ✨ **Shiny**" if variant == "shiny" else ""
+                    detail = f"AI confidence: {score:.1%}" if method == "AI" else f"hash distance: {score}/64"
                     await message.channel.send(
-                        f"🔎 I think this Pokémon is **{name}**{shiny}. (match distance: {distance}/64)",
+                        f"🔎 I think this Pokémon is **{name}**{shiny}. ({method}: {detail})",
                         reference=message, mention_author=False,
                         allowed_mentions=discord.AllowedMentions.none()
                     )
@@ -145,6 +151,70 @@ async def on_message(message):
                 pending_messages.add(message.id)
                 asyncio.create_task(process_images(message))
 
+@bot.command(name="ai")
+@owner_only()
+async def ai_status(ctx):
+    from ai_detector import model_status
+    status = model_status()
+    root = Path("data/training")
+    classes = [p for p in root.iterdir() if p.is_dir()] if root.exists() else []
+    samples = sum(1 for p in root.rglob("*") if p.is_file()) if root.exists() else 0
+    state = "✅ Model files found" if status["available"] else "⚠️ Model not trained/exported yet"
+    await ctx.reply(
+        f"**Local AI status**\n{state}\n"
+        f"Training examples: **{samples}** across **{len(classes)}** Pokémon labels\n"
+        f"Model: `{status['model']}`\n"
+        f"Labels: `{status['labels']}`\n"
+        f"AI confidence threshold: **{__import__('os').getenv('AI_CONFIDENCE', '0.65')}**"
+    )
+
+@bot.command(name="learn")
+@owner_only()
+async def learn_spawn(ctx, *, pokemon: str):
+    """Save a correctly labelled spawn image by replying to that image."""
+    if http_session is None or http_session.closed:
+        return await ctx.reply("Image downloader is not ready yet.")
+    reference = ctx.message.reference
+    if not reference or not reference.message_id:
+        return await ctx.reply("Reply directly to a Pokémon spawn image with `.learn Pikachu`.")
+    try:
+        target = reference.resolved
+        if target is None:
+            target = await ctx.channel.fetch_message(reference.message_id)
+    except discord.HTTPException:
+        return await ctx.reply("I couldn't read the message you replied to.")
+    label = re.sub(r"[^a-z0-9_-]+", "_", pokemon.strip().lower()).strip("_")
+    if not label:
+        return await ctx.reply("Please provide a valid Pokémon name.")
+    urls = (await get_image_urls(target))[:4]
+    if not urls:
+        return await ctx.reply("The replied message has no accessible image.")
+    folder = Path("data/training") / label
+    folder.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    for index, url in enumerate(urls, start=1):
+        try:
+            async with http_session.get(url, allow_redirects=True) as response:
+                if response.status != 200 or not response.headers.get("Content-Type", "").lower().startswith("image/"):
+                    continue
+                raw = await response.content.read(config.MAX_IMAGE_SIZE + 1)
+                if len(raw) > config.MAX_IMAGE_SIZE:
+                    continue
+            def write_image(data, destination):
+                with Image.open(io.BytesIO(data)) as source:
+                    image = source.convert("RGB")
+                    image.thumbnail((1600, 1600))
+                    image.save(destination, format="JPEG", quality=92, optimize=True)
+            destination = folder / f"{target.id}_{index}.jpg"
+            await asyncio.to_thread(write_image, raw, destination)
+            saved += 1
+        except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
+            log.exception("Could not save labelled training image from %s", url)
+    if saved:
+        await ctx.reply(f"✅ Saved **{saved}** image(s) as **{label.replace('_', ' ').title()}**. Collect more varied examples before training.")
+    else:
+        await ctx.reply("❌ I couldn't save that image. Check the bot logs.")
+
 @bot.command(name="help")
 async def help_command(ctx):
     await ctx.send(
@@ -153,7 +223,9 @@ async def help_command(ctx):
         f"`{config.PREFIX}status <online|idle|dnd|invisible>` — owner only\n"
         f"`{config.PREFIX}join` / `{config.PREFIX}leave` — owner only, voice\n"
         f"`{config.PREFIX}dataset` — show cached reference count\n"
-        f"`{config.PREFIX}dataset sync` — owner-only refresh from PokeAPI"
+        f"`{config.PREFIX}dataset sync` — owner-only refresh from PokeAPI\n"
+        f"`{config.PREFIX}learn <Pokemon>` — owner-only; reply to a spawn image to collect a labelled AI example\n"
+        f"`{config.PREFIX}ai` — owner-only local AI status"
     )
 
 @bot.command()
