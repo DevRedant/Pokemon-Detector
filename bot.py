@@ -220,7 +220,7 @@ async def help_command(ctx):
     await ctx.send(
         f"**Pokémon Detector**\n"
         f"`{config.PREFIX}feedback <message>` — send feedback to the owner\n"
-        f"`{config.PREFIX}status <online|idle|dnd|invisible>` — owner only\n"
+        f"`{config.PREFIX}status <online|idle|dnd|invisible> <activity text>` — owner only; sets status and Playing activity\n"
         f"`{config.PREFIX}join` / `{config.PREFIX}leave` — owner only, voice\n"
         f"`{config.PREFIX}dataset` — show cached reference count\n"
         f"`{config.PREFIX}dataset sync` — owner-only refresh from PokeAPI\n"
@@ -262,7 +262,7 @@ async def dataset_sync(ctx):
 
 @bot.command()
 @owner_only()
-async def status(ctx, state: str):
+async def status(ctx, state: str, *, activity_text: str = None):
     choices = {
         "online": discord.Status.online,
         "idle": discord.Status.idle,
@@ -271,9 +271,21 @@ async def status(ctx, state: str):
     }
     value = choices.get(state.lower())
     if value is None:
-        return await ctx.reply("Use: online, idle, dnd or invisible.")
-    await bot.change_presence(status=value)
-    await ctx.reply(f"✅ Status changed to **{state.lower()}**.")
+        return await ctx.reply(
+            "Use: `.status online Playing Pokémon`, "
+            "`.status idle Watching spawns`, "
+            "`.status dnd Detecting Pokémon` or "
+            "`.status invisible Taking a break`."
+        )
+
+    activity = discord.Game(name=activity_text[:128]) if activity_text else None
+    await bot.change_presence(status=value, activity=activity)
+    if activity_text:
+        await ctx.reply(
+            f"✅ Status changed to **{state.lower()}** with activity **Playing {activity_text[:128]}**."
+        )
+    else:
+        await ctx.reply(f"✅ Status changed to **{state.lower()}** and activity cleared.")
 
 @bot.command()
 @owner_only()
