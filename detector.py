@@ -35,6 +35,29 @@ def fingerprint_image(image):
     image.thumbnail((512, 512))
     return (imagehash.phash(image), imagehash.dhash(image), imagehash.whash(image))
 
+
+def fingerprint_image_crops(image):
+    """Fingerprint the full scene and centered crops to reduce background influence."""
+    image = image.convert("RGB")
+    width, height = image.size
+    fingerprints = [fingerprint_image(image)]
+
+    # Pokémon spawn artwork is usually near the center. A square crop removes
+    # much of the surrounding scene while retaining the central subject.
+    side = min(width, height)
+    center_x, center_y = width // 2, height // 2
+    for scale in (1.0, 0.9, 0.8, 0.7):
+        crop_side = max(1, int(side * scale))
+        left = max(0, center_x - crop_side // 2)
+        top = max(0, center_y - crop_side // 2)
+        right = min(width, left + crop_side)
+        bottom = min(height, top + crop_side)
+        crop = image.crop((left, top, right, bottom))
+        if crop.size != image.size:
+            fingerprints.append(fingerprint_image(crop))
+
+    return fingerprints
+
 def encode_fingerprint(hashes):
     return "v2|" + "|".join(str(item) for item in hashes)
 
@@ -52,13 +75,18 @@ def _distance(query, stored):
         return None
 
 def best_match(query_hashes):
-    if query_hashes is None:
+    if not query_hashes:
         return None
+    # Compare each stored reference against every crop and keep its best score.
     ranked = []
     for row in get_all_hashes():
-        distance = _distance(query_hashes, row["image_hash"])
-        if distance is not None:
-            ranked.append((distance, row["pokemon_name"], row["variant"]))
+        distances = [
+            _distance(query, row["image_hash"])
+            for query in query_hashes
+        ]
+        distances = [distance for distance in distances if distance is not None]
+        if distances:
+            ranked.append((min(distances), row["pokemon_name"], row["variant"]))
     if not ranked:
         log.warning("No usable reference hashes are available for comparison.")
         return None
@@ -96,7 +124,7 @@ async def read_image_url(url, session):
         with Image.open(io.BytesIO(raw)) as image:
             image.verify()
         with Image.open(io.BytesIO(raw)) as image:
-            return await asyncio.to_thread(fingerprint_image, image.copy())
+            return await asyncio.to_thread(fingerprint_image_crops, image.copy())
     except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
         return None
 
