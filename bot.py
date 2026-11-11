@@ -36,6 +36,13 @@ dataset_lock = asyncio.Lock()
 detection_semaphore = asyncio.Semaphore(config.DETECTION_CONCURRENCY)
 pending_messages = set()
 
+def make_embed(title, description=None, color=discord.Color.blurple()):
+    embed = discord.Embed(title=title, description=description, color=color)
+    embed.set_footer(text="Pokémon Detector")
+    return embed
+
+async def reply_embed(ctx, title, description=None, *, color=discord.Color.blurple()):
+    return await ctx.reply(embed=make_embed(title, description, color=color))
 def owner_only():
     async def predicate(ctx):
         return ctx.author.id == config.OWNER_ID
@@ -173,22 +180,22 @@ async def ai_status(ctx):
 async def learn_spawn(ctx, *, pokemon: str):
     """Save a correctly labelled spawn image by replying to that image."""
     if http_session is None or http_session.closed:
-        return await ctx.reply("Image downloader is not ready yet.")
+        return await reply_embed(ctx, "Image downloader is not ready yet", "Image downloader is not ready yet.", color=discord.Color.orange())
     reference = ctx.message.reference
     if not reference or not reference.message_id:
-        return await ctx.reply("Reply directly to a Pokémon spawn image with `.learn Pikachu`.")
+        return await reply_embed(ctx, "Reply directly to a Pokémon spawn image with `", "Reply directly to a Pokémon spawn image with `.learn Pikachu`.", color=discord.Color.orange())
     try:
         target = reference.resolved
         if target is None:
             target = await ctx.channel.fetch_message(reference.message_id)
     except discord.HTTPException:
-        return await ctx.reply("I couldn't read the message you replied to.")
+        return await reply_embed(ctx, "I couldn't read the message you replied to", "I couldn't read the message you replied to.", color=discord.Color.orange())
     label = re.sub(r"[^a-z0-9_-]+", "_", pokemon.strip().lower()).strip("_")
     if not label:
-        return await ctx.reply("Please provide a valid Pokémon name.")
+        return await reply_embed(ctx, "Please provide a valid Pokémon name", "Please provide a valid Pokémon name.", color=discord.Color.orange())
     urls = (await get_image_urls(target))[:4]
     if not urls:
-        return await ctx.reply("The replied message has no accessible image.")
+        return await reply_embed(ctx, "The replied message has no accessible image", "The replied message has no accessible image.", color=discord.Color.orange())
     folder = Path("data/training") / label
     folder.mkdir(parents=True, exist_ok=True)
     saved = 0
@@ -213,26 +220,24 @@ async def learn_spawn(ctx, *, pokemon: str):
     if saved:
         await ctx.reply(f"✅ Saved **{saved}** image(s) as **{label.replace('_', ' ').title()}**. Collect more varied examples before training.")
     else:
-        await ctx.reply("❌ I couldn't save that image. Check the bot logs.")
+        await reply_embed(ctx, "❌ I couldn't save that image", "❌ I couldn't save that image. Check the bot logs.", color=discord.Color.orange())
 
 @bot.command(name="help")
 async def help_command(ctx):
-    await ctx.send(
-        f"**Pokémon Detector**\n"
-        f"`{config.PREFIX}feedback <message>` — send feedback to the owner\n"
-        f"`{config.PREFIX}status <online|idle|dnd|invisible> <activity text>` — owner only; sets status and Playing activity\n"
-        f"`{config.PREFIX}join` / `{config.PREFIX}leave` — owner only, voice\n"
-        f"`{config.PREFIX}dataset` — show cached reference count\n"
-        f"`{config.PREFIX}dataset sync` — owner-only refresh from PokeAPI\n"
-        f"`{config.PREFIX}learn <Pokemon>` — owner-only; reply to a spawn image to collect a labelled AI example\n"
-        f"`{config.PREFIX}ai` — owner-only local AI status"
-    )
+    embed = make_embed("Pokémon Detector • Command Guide", "Commands and tools available in this server.")
+    embed.add_field(name="🔎 Detection", value="Automatic Pokémon image detection runs in accessible channels.", inline=False)
+    embed.add_field(name="📊 Presence", value=f"`{config.PREFIX}status <online|idle|dnd|invisible> <activity text>` — change status and Playing text (owner only).", inline=False)
+    embed.add_field(name="🤖 AI", value=f"`{config.PREFIX}ai` — local AI status (owner only).\n`{config.PREFIX}learn <Pokemon>` — save a labelled image example (owner only).", inline=False)
+    embed.add_field(name="📚 Dataset", value=f"`{config.PREFIX}dataset` — cached image count.\n`{config.PREFIX}dataset sync` — refresh image references (owner only).", inline=False)
+    embed.add_field(name="🔊 Voice", value=f"`{config.PREFIX}join` / `{config.PREFIX}leave` — voice controls (owner only).", inline=False)
+    embed.add_field(name="💬 Feedback", value=f"`{config.PREFIX}feedback <message>` — send feedback to the owner.", inline=False)
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def feedback(ctx, *, text: str):
     text = text.strip()
     if not text:
-        return await ctx.reply("Please include your feedback.")
+        return await reply_embed(ctx, "Please include your feedback", "Please include your feedback.", color=discord.Color.orange())
     owner = await bot.fetch_user(config.OWNER_ID)
     embed = discord.Embed(title="New Pokémon Detector feedback",
                           description=text[:4000], color=0x55AAFF)
@@ -240,19 +245,19 @@ async def feedback(ctx, *, text: str):
     embed.add_field(name="Location", value=ctx.guild.name if ctx.guild else "Direct message", inline=False)
     owner_message = await owner.send(embed=embed)
     save_feedback(owner_message.id, ctx.author.id)
-    await ctx.reply("✅ Your feedback was sent to the bot owner.")
+    await reply_embed(ctx, "✅ Your feedback was sent to the bot owner", "✅ Your feedback was sent to the bot owner.", color=discord.Color.orange())
 
 @bot.group(invoke_without_command=True)
 async def dataset(ctx):
-    await ctx.send(f"📚 Cached reference images: **{image_count()}**")
+    await ctx.send(embed=make_embed("Pokémon Dataset", f"Cached reference images: **{image_count():,}**"))
 
 @dataset.command(name="sync")
 @owner_only()
 async def dataset_sync(ctx):
     if dataset_lock.locked():
-        return await ctx.reply("⏳ A dataset sync is already running.")
+        return await reply_embed(ctx, "⏳ A dataset sync is already running", "⏳ A dataset sync is already running.", color=discord.Color.orange())
     async with dataset_lock:
-        msg = await ctx.reply("⏳ Updating Pokémon reference images from PokeAPI. This may take a while...")
+        msg = await reply_embed(ctx, "⏳ Updating Pokémon reference images from PokeAPI", "⏳ Updating Pokémon reference images from PokeAPI. This may take a while...", color=discord.Color.orange())
         try:
             count = await sync_dataset()
             await msg.edit(content=f"✅ Dataset sync finished. Processed **{count}** images. Total cached: **{image_count()}**.")
@@ -285,42 +290,42 @@ async def status(ctx, state: str, *, activity_text: str = None):
             f"✅ Status changed to **{state.lower()}** with activity **Playing {activity_text[:128]}**."
         )
     else:
-        await ctx.reply(f"✅ Status changed to **{state.lower()}** and activity cleared.")
+        await reply_embed(ctx, "Presence updated", f"**Status:** {state.lower()}\n**Activity:** Cleared", color=discord.Color.green())
 
 @bot.command()
 @owner_only()
 async def join(ctx):
     if not ctx.guild or not getattr(ctx.author, "voice", None) or not ctx.author.voice.channel:
-        return await ctx.reply("Join a voice channel first.")
+        return await reply_embed(ctx, "Join a voice channel first", "Join a voice channel first.", color=discord.Color.orange())
     channel = ctx.author.voice.channel
     voice = ctx.guild.voice_client
     if voice:
         await voice.move_to(channel)
     else:
         await channel.connect()
-    await ctx.reply(f"🔊 Joined **{channel.name}**.")
+    await reply_embed(ctx, "Voice connected", f"Joined **{channel.name}**.", color=discord.Color.green())
 
 @bot.command()
 @owner_only()
 async def leave(ctx):
     voice = ctx.guild.voice_client if ctx.guild else None
     if not voice:
-        return await ctx.reply("I'm not in a voice channel.")
+        return await reply_embed(ctx, "I'm not in a voice channel", "I'm not in a voice channel.", color=discord.Color.orange())
     await voice.disconnect()
-    await ctx.reply("👋 Left the voice channel.")
+    await reply_embed(ctx, "👋 Left the voice channel", "👋 Left the voice channel.", color=discord.Color.orange())
 
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
-        return await ctx.reply(f"❓ Unknown command. Use `{config.PREFIX}help`.")
+        return await reply_embed(ctx, "Unknown command", f"That command does not exist. Use `{config.PREFIX}help`.", color=discord.Color.orange())
     if isinstance(error, commands.CheckFailure):
-        return await ctx.reply("⛔ This command is owner-only.")
+        return await reply_embed(ctx, "⛔ This command is owner-only", "⛔ This command is owner-only.", color=discord.Color.orange())
     if isinstance(error, commands.MissingRequiredArgument):
-        return await ctx.reply(f"Missing information. Use `{config.PREFIX}help`.")
+        return await reply_embed(ctx, "Missing information", f"Use `{config.PREFIX}help` to see command usage.", color=discord.Color.orange())
     if isinstance(error, commands.CommandOnCooldown):
-        return await ctx.reply("⏳ Please wait before using that command again.")
+        return await reply_embed(ctx, "⏳ Please wait before using that command again", "⏳ Please wait before using that command again.", color=discord.Color.orange())
     log.error("Command error: %s", error, exc_info=error)
-    await ctx.reply("Something went wrong while running that command.")
+    await reply_embed(ctx, "Something went wrong while running that command", "Something went wrong while running that command.", color=discord.Color.orange())
 
 async def main():
     init_db()
