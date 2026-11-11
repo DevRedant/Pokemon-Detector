@@ -104,6 +104,14 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
+    if message.guild:
+        print(
+            f"[DEBUG] Message from: {message.author} | "
+            f"Bot: {message.author.bot} | "
+            f"Embeds: {len(message.embeds)} | "
+            f"Attachments: {len(message.attachments)}"
+        )
+
     if bot.user and message.author.id == bot.user.id:
         return
 
