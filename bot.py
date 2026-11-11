@@ -96,13 +96,13 @@ async def process_images(message):
                 if result:
                     name, variant, score, method = result
                     mark_detected(message.id, name)
-                    shiny = " ✨ **Shiny**" if variant == "shiny" else ""
-                    detail = f"AI confidence: {score:.1%}" if method == "AI" else f"hash distance: {score}/64"
-                    await message.channel.send(
-                        f"🔎 I think this Pokémon is **{name}**{shiny}. ({method}: {detail})",
-                        reference=message, mention_author=False,
-                        allowed_mentions=discord.AllowedMentions.none()
-                    )
+                    shiny = " ✨ Shiny" if variant == "shiny" else ""
+                    detail = f"AI confidence: {score:.1%}" if method == "AI" else f"Hash distance: {score}/64"
+                    result_embed = make_embed("Pokémon detected!",
+                        f"## {name}{shiny}\n**Detection method:** {method}\n**Match detail:** {detail}",
+                        color=discord.Color.green())
+                    await message.channel.send(embed=result_embed, reference=message,
+                        mention_author=False, allowed_mentions=discord.AllowedMentions.none())
                     log.info("Detected %s (variant=%s, method=%s, score=%s) in message %s",
                              name, variant, method, score, message.id)
                     return
@@ -167,13 +167,13 @@ async def ai_status(ctx):
     classes = [p for p in root.iterdir() if p.is_dir()] if root.exists() else []
     samples = sum(1 for p in root.rglob("*") if p.is_file()) if root.exists() else 0
     state = "✅ Model files found" if status["available"] else "⚠️ Model not trained/exported yet"
-    await ctx.reply(
-        f"**Local AI status**\n{state}\n"
-        f"Training examples: **{samples}** across **{len(classes)}** Pokémon labels\n"
-        f"Model: `{status['model']}`\n"
-        f"Labels: `{status['labels']}`\n"
-        f"AI confidence threshold: **{__import__('os').getenv('AI_CONFIDENCE', '0.65')}**"
-    )
+    embed = make_embed("Local AI status", state,
+        color=discord.Color.green() if status["available"] else discord.Color.orange())
+    embed.add_field(name="Training examples", value=f"{samples} across {len(classes)} Pokémon labels", inline=True)
+    embed.add_field(name="Model", value=f"`{status['model']}`", inline=False)
+    embed.add_field(name="Labels", value=f"`{status['labels']}`", inline=False)
+    embed.add_field(name="Confidence threshold", value=__import__('os').getenv('AI_CONFIDENCE', '0.65'), inline=True)
+    await ctx.reply(embed=embed)
 
 @bot.command(name="learn")
 @owner_only()
@@ -218,7 +218,9 @@ async def learn_spawn(ctx, *, pokemon: str):
         except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
             log.exception("Could not save labelled training image from %s", url)
     if saved:
-        await ctx.reply(f"✅ Saved **{saved}** image(s) as **{label.replace('_', ' ').title()}**. Collect more varied examples before training.")
+        await ctx.reply(embed=make_embed("Training image saved",
+            f"Saved **{saved}** image(s) as **{label.replace('_', ' ').title()}**.\nCollect more varied examples before training.",
+            color=discord.Color.green()))
     else:
         await reply_embed(ctx, "❌ I couldn't save that image", "❌ I couldn't save that image. Check the bot logs.", color=discord.Color.orange())
 
@@ -260,10 +262,14 @@ async def dataset_sync(ctx):
         msg = await reply_embed(ctx, "⏳ Updating Pokémon reference images from PokeAPI", "⏳ Updating Pokémon reference images from PokeAPI. This may take a while...", color=discord.Color.orange())
         try:
             count = await sync_dataset()
-            await msg.edit(content=f"✅ Dataset sync finished. Processed **{count}** images. Total cached: **{image_count()}**.")
+            done = make_embed("Dataset sync complete",
+                f"Processed **{count:,}** images.\nTotal cached: **{image_count():,}**.",
+                color=discord.Color.green())
+            await msg.edit(content=None, embed=done)
         except Exception as exc:
             log.exception("Dataset sync failed")
-            await msg.edit(content=f"❌ Dataset sync failed: `{str(exc)[:250]}`")
+            await msg.edit(content=None, embed=make_embed("Dataset sync failed",
+                f"`{str(exc)[:250]}`", color=discord.Color.red()))
 
 @bot.command()
 @owner_only()
@@ -286,9 +292,9 @@ async def status(ctx, state: str, *, activity_text: str = None):
     activity = discord.Game(name=activity_text[:128]) if activity_text else None
     await bot.change_presence(status=value, activity=activity)
     if activity_text:
-        await ctx.reply(
-            f"✅ Status changed to **{state.lower()}** with activity **Playing {activity_text[:128]}**."
-        )
+        await ctx.reply(embed=make_embed("Presence updated",
+            f"**Status:** {state.lower()}\n**Activity:** Playing {activity_text[:128]}",
+            color=discord.Color.green()))
     else:
         await reply_embed(ctx, "Presence updated", f"**Status:** {state.lower()}\n**Activity:** Cleared", color=discord.Color.green())
 
