@@ -72,7 +72,14 @@ async def process_images(message):
         if http_session is None or http_session.closed or was_detected(message.id):
             return
         async with detection_semaphore:
-            for url in (await get_image_urls(message))[:4]:
+            image_urls = (await get_image_urls(message))[:4]
+            log.info(
+                "Checking message %s from %s (%s): %d image URL(s)",
+                message.id, message.author, "bot" if message.author.bot else "user",
+                len(image_urls)
+            )
+            for url in image_urls:
+                log.info("Downloading image for message %s: %s", message.id, url)
                 result = await detect_url(url, http_session)
                 if result:
                     name, variant, distance = result
@@ -83,7 +90,10 @@ async def process_images(message):
                         reference=message, mention_author=False,
                         allowed_mentions=discord.AllowedMentions.none()
                     )
+                    log.info("Detected %s (variant=%s, distance=%s) in message %s",
+                             name, variant, distance, message.id)
                     return
+                log.info("No Pokémon match for image in message %s", message.id)
     except (discord.HTTPException, aiohttp.ClientError):
         log.exception("Could not process image message %s", message.id)
     except Exception:
@@ -104,12 +114,10 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.guild:
-        print(
-            f"[DEBUG] Message from: {message.author} | "
-            f"Bot: {message.author.bot} | "
-            f"Embeds: {len(message.embeds)} | "
-            f"Attachments: {len(message.attachments)}"
+    if message.guild and message.author.bot and (message.embeds or message.attachments):
+        log.info(
+            "Received bot image candidate: author=%s (%s), embeds=%d, attachments=%d",
+            message.author, message.author.id, len(message.embeds), len(message.attachments)
         )
 
     if bot.user and message.author.id == bot.user.id:
