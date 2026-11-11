@@ -1,50 +1,42 @@
 # Local AI setup
 
-This project supports optional **local-only** Pokémon image classification with ONNX Runtime.
-The Discord bot does not call a third-party AI API. The model is loaded from local files.
+The project can automatically download Pokémon images and labels from PokeAPI, then train and export a local MobileNetV3 classifier. The running Discord bot uses the exported ONNX model locally and does not call an AI inference API.
 
-## 1. Collect real Pokétwo spawn examples
+## 1. Train automatically (on a separate PC)
 
-1. Start the bot and make sure it can see the spawn image.
-2. Reply directly to that spawn image with `.learn Pikachu` (replace Pikachu with the correct label).
-3. Repeat for many Pokémon and varied backgrounds. The command is owner-only.
-4. Images are stored locally under `data/training/<pokemon-name>/`.
-
-Use correctly labelled images. Do not train on guessed labels. Aim for at least 20-50 varied examples per Pokémon to start; more is better. The classifier is only as good as the labelled scene examples.
-
-## 2. Train away from the bot host
-
-Training needs considerably more memory than inference. On a PC with Python 3.10 or 3.11:
+Training needs more memory and compute than the bot's inference process. On a PC with Python 3.10 or 3.11:
 
 ```bash
 pip install -r requirements-train.txt
 python train_ai.py --epochs 12
 ```
 
-The training script uses torchvision's pretrained MobileNetV3-Small ImageNet weights as a starting point. This is a downloadable open-source model weight, **not an AI API**. Training and export happen locally on that machine. Copy these two generated files into the repository/deployment:
+The script automatically:
+- Retrieves Pokémon/form records from PokeAPI
+- Downloads available normal, shiny, official-artwork, HOME and Showdown images
+- Uses each API record's Pokémon name as its label
+- Skips classes that have fewer than two downloaded images
+- Fine-tunes a MobileNetV3-Small classifier head and exports the model
+
+No manual `.learn` commands or hand-labelled image folders are required for this automatic sprite/artwork dataset. You can use `--no-download` to train from an existing `data/auto_training` folder.
+
+## 2. Copy the exported model to the bot host
+
+After training, copy these two files from the training PC into the bot's `models/` directory:
 
 - `models/pokemon_mobilenet.onnx`
 - `models/pokemon_labels.json`
 
-Do not commit private images or large model files to a public repository. Upload them to your hosting's persistent storage instead, and set `AI_MODEL_PATH` and `AI_LABELS_PATH` if needed.
+Restart the bot and run `.ai` to check that the files are detected. Keep the model files on persistent storage.
 
-## 3. Install runtime dependencies and restart
+## Important accuracy limitation
 
-```bash
-pip install -r requirements.txt
-```
+PokeAPI provides Pokémon sprites and artwork, not Pokétwo's actual spawn screenshots. This automatically trained model can classify images resembling its training artwork, but it is **not guaranteed to recognise real spawn scenes with backgrounds, effects, overlays or unusual crops**. Synthetic backgrounds alone cannot reliably reproduce Pokétwo's rendering. Strong scene-level accuracy would require a suitable collection of real spawn examples; the bot does not fabricate those labels.
 
-The bot tries hash matching first, then local AI if a model is present. If no model is present or confidence is below `AI_CONFIDENCE`, it reports no match rather than inventing a Pokémon.
+The model is a whole-image classifier, not an object detector. It predicts one Pokémon from the image crop. Treat predictions as guesses and validate with unseen images before relying on them.
 
 ## Commands
 
-- `.ai` — owner-only model status and number of collected examples.
-- `.learn <Pokemon>` — owner-only; reply to a spawn image to save a labelled training example.
-- `.dataset` — existing reference image count.
-
-## Important limitations
-
-- The existing PokeAPI sprite database is not a scene-image training set.
-- A useful model requires correctly labelled Pokétwo-style spawn screenshots, ideally with varied backgrounds, sizes, and visual effects.
-- This is image classification, not object detection. It predicts from a centered crop; screenshots with the Pokémon far from the center may be missed.
-- Validation accuracy on a small dataset is not proof of real-world accuracy. Test with unseen spawn screenshots.
+- `.ai` — show local model status and collected optional examples.
+- `.learn <Pokemon>` — optional owner-only manual scene-example collector; not required for automatic sprite training.
+- `.dataset` — show the existing perceptual-hash reference image count.
