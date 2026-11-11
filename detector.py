@@ -1,6 +1,7 @@
 import asyncio
 import io
 import ipaddress
+import logging
 from urllib.parse import urlparse
 
 import aiohttp
@@ -9,6 +10,8 @@ import imagehash
 
 from config import MATCH_THRESHOLD, MATCH_MIN_MARGIN, MAX_IMAGE_SIZE
 from database import get_all_hashes
+
+log = logging.getLogger("pokedetector.detector")
 
 def _safe_image_url(url):
     try:
@@ -57,9 +60,18 @@ def best_match(query_hashes):
         if distance is not None:
             ranked.append((distance, row["pokemon_name"], row["variant"]))
     if not ranked:
+        log.warning("No usable reference hashes are available for comparison.")
         return None
     ranked.sort(key=lambda item: item[0])
     best = ranked[0]
+    log.info(
+        "Top Pokémon candidates: %s (threshold=%s, min_margin=%s)",
+        "; ".join(
+            f"{name}/{variant}: {distance:.1f}"
+            for distance, name, variant in ranked[:5]
+        ),
+        MATCH_THRESHOLD, MATCH_MIN_MARGIN
+    )
     # Ambiguity is measured against a different Pokémon label, not another sprite of the same one.
     second = next((item for item in ranked[1:] if item[1].casefold() != best[1].casefold()), None)
     if best[0] > MATCH_THRESHOLD:
@@ -72,7 +84,7 @@ async def read_image_url(url, session):
     if not _safe_image_url(url):
         return None
     try:
-        async with session.get(url, allow_redirects=False) as response:
+        async with session.get(url, allow_redirects=True) as response:
             if response.status != 200:
                 return None
             content_type = response.headers.get("Content-Type", "").lower()
@@ -90,4 +102,7 @@ async def read_image_url(url, session):
 
 async def detect_url(url, session):
     hashes = await read_image_url(url, session)
+    if hashes is None:
+        log.warning("Could not read image for Pokémon detection: %s", url)
+        return None
     return best_match(hashes)
