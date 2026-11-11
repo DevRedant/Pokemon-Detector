@@ -124,13 +124,32 @@ async def read_image_url(url, session):
         with Image.open(io.BytesIO(raw)) as image:
             image.verify()
         with Image.open(io.BytesIO(raw)) as image:
-            return await asyncio.to_thread(fingerprint_image_crops, image.copy())
+            hashes = await asyncio.to_thread(fingerprint_image_crops, image.copy())
+        return hashes, raw
     except (aiohttp.ClientError, OSError, UnidentifiedImageError, ValueError):
         return None
 
 async def detect_url(url, session):
-    hashes = await read_image_url(url, session)
-    if hashes is None:
+    image_data = await read_image_url(url, session)
+    if image_data is None:
         log.warning("Could not read image for Pokémon detection: %s", url)
         return None
-    return best_match(hashes)
+    hashes, raw = image_data
+
+    # Keep the lightweight existing matcher as the first pass.
+    match = best_match(hashes)
+    if match:
+        return (*match, "hash")
+
+    # If no hash match exists, try the optional local ONNX model.
+    try:
+        from ai_detector import predict_image, model_status
+        if model_status()["available"]:
+            prediction = await asyncio.to_thread(predict_image, raw)
+            if prediction:
+                name, confidence = prediction
+                log.info("Local AI predicted %s with confidence %.3f", name, confidence)
+                return name.replace("_", " ").title(), "normal", round(confidence, 3), "AI"
+    except Exception:
+        log.exception("Local AI fallback failed; continuing without it.")
+    return None
