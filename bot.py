@@ -282,12 +282,9 @@ async def status(ctx, state: str, *, activity_text: str = None):
     }
     value = choices.get(state.lower())
     if value is None:
-        return await ctx.reply(
-            "Use: `.status online Playing Pokémon`, "
-            "`.status idle Watching spawns`, "
-            "`.status dnd Detecting Pokémon` or "
-            "`.status invisible Taking a break`."
-        )
+        return await reply_embed(ctx, "Invalid status",
+            "Choose online, idle, dnd or invisible, followed by your activity text. Example: .status online Playing Pokémon",
+            color=discord.Color.orange())
 
     activity = discord.Game(name=activity_text[:128]) if activity_text else None
     await bot.change_presence(status=value, activity=activity)
