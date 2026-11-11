@@ -1,0 +1,6 @@
+discord.py>=2.4,<3
+aiohttp>=3.10,<4
+Pillow>=10,<12
+torch>=2.2,<3
+transformers>=4.44,<5
+safetensors>=0.4
