@@ -126,27 +126,32 @@ def main():
     kept = [i for i, count in counts.items() if count >= 2]
     if len(kept) < 2:
         raise SystemExit("Not enough classes have two or more images.")
-    indices_by_class = {i: [] for i in kept}
-    for index, (_, class_index) in enumerate(train_all.samples):
-        if class_index in indices_by_class:
-            indices_by_class[class_index].append(index)
+    # Rebuild a compact class mapping after excluding single-image classes.
+    kept_names = [train_all.classes[i] for i in kept]
+    remap = {old: new for new, old in enumerate(kept)}
+    filtered_samples = [(path, remap[label]) for path, label in train_all.samples if label in remap]
+    train_all.samples = filtered_samples
+    train_all.imgs = filtered_samples
+    train_all.targets = [label for _, label in filtered_samples]
+    train_all.classes = kept_names
+    train_all.class_to_idx = {name: index for index, name in enumerate(kept_names)}
+    eval_all.samples = filtered_samples
+    eval_all.imgs = filtered_samples
+    eval_all.targets = list(train_all.targets)
+    eval_all.classes = kept_names
+    eval_all.class_to_idx = dict(train_all.class_to_idx)
+
+    indices_by_class = {i: [] for i in range(len(kept_names))}
+    for index, (_, class_index) in enumerate(filtered_samples):
+        indices_by_class[class_index].append(index)
     train_indices, val_indices = [], []
     for class_indices in indices_by_class.values():
-        class_indices.sort()
         split = max(1, int(len(class_indices) * 0.8))
         if split >= len(class_indices):
             split = len(class_indices) - 1
         train_indices.extend(class_indices[:split])
         val_indices.extend(class_indices[split:])
 
-    # Rebuild a compact class mapping after excluding single-image classes.
-    kept_names = [train_all.classes[i] for i in kept]
-    remap = {old: new for new, old in enumerate(kept)}
-    train_samples = [(path, remap[label]) for path, label in train_all.samples if label in remap]
-    train_all.samples = train_samples
-    train_all.imgs = train_samples
-    eval_all.samples = train_samples
-    eval_all.imgs = train_samples
     train_loader = DataLoader(Subset(train_all, train_indices), batch_size=args.batch_size,
                               shuffle=True, num_workers=2)
     val_loader = DataLoader(Subset(eval_all, val_indices), batch_size=args.batch_size,
